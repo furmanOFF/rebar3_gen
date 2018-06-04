@@ -67,7 +67,12 @@ fetch(Url) ->
                        rebar) of
         {ok, {{_Version, 200, _Reason}, Headers, Body}} ->
             rebar_api:debug("Successfully downloaded ~ts", [Url]),
-            {ok, Body};
+            case lists:keyfind(<<"Content-Type">>, 1, Headers) of
+                {_, <<"application/json">>} ->
+                    jsx:decode(Body, [return_maps]);
+                _ ->
+                    Body
+            end;
         {ok, {{_Version, Code, _Reason}, _Headers, _Body}} ->
             rebar_api:debug("Request to ~p failed: status code ~p", [Url, Code]),
             erlang:error({http, Code});
@@ -87,24 +92,15 @@ transform(Data, []) ->
 transform(_, _) -> 
     error({badarg, transform}).
 
-template(Data, {src, File})->
-    Priv = code:priv_dir(cryptoea),
-    Template = bbmustache:parse_file(File),
-    bbmustache:compile(Template, Data, [{key_type, binary}]);
-template(Data, {src, File})->
+template(Data, {file, File}) ->
     Template = bbmustache:parse_file(File),
     compile(Data, Template);
-template(Data, {file, File})->
-    Template = bbmustache:parse_file(File),
+template(Data, Bin) when is_binary(Bin) ->
+    Template = bbmustache:parse_binary(Bin),
+    compile(Data, Template);
+template(Data, String) when is_list(String) ->
+    Template = bbmustache:parse_binary(list_to_binary(String)),
     compile(Data, Template).
 
 compile(Data, Template) ->
     bbmustache:compile(Template, Data, [{key_type, binary}]).
-% path({priv, Filename}) ->
-%     Priv = code:priv_dir(cryptoea),
-%     filename:join([Priv, Filename]);
-% path(Filename) when is_list(Filename); is_atom(Filename); is_binary(Filename) ->
-%     Filename;
-% path(Other) ->
-%     error({badarg, Other}).
-
