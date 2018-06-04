@@ -1,0 +1,7 @@
+{application, rebar3_gen, [
+    {description, "rebar3 plugin"},
+    {vsn, "0.1.0"},
+    {registered, []},
+    {applications, [kernel, stdlib, inets, jsx]},
+    {env, []}
+]}.
