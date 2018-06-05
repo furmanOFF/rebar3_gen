@@ -3,7 +3,7 @@
 -export([init/1, do/1, format_error/1]).
 
 -define(PROVIDER, gen).
--define(DEPS, [default, app_discovery]).
+-define(DEPS, [app_discovery]).
 
 %% ===================================================================
 %% Public API
@@ -17,8 +17,8 @@ init(State) ->
         {deps, ?DEPS},
         {example, "rebar3 gen"},
         {opts, []},
-        {short_desc, "A rebar plugin"},
-        {desc, "A rebar plugin"}
+        {short_desc, "Source file generator"},
+        {desc, "Convert .gen {{mustache}} files from given URL"}
     ]),
     {ok, rebar_state:add_provider(State, Provider)}.
 
@@ -31,8 +31,16 @@ do(State) ->
         AppInfo ->
             [AppInfo]
     end,
-    Generators = rebar_state:get(gen, State, []),
-    lists:foreach(fun generate/1, Generators),
+    [begin
+        Opts = rebar_app_info:opts(AppInfo),
+        SourceDir = filename:join(rebar_app_info:dir(AppInfo), "src"),
+        FoundFiles = rebar_utils:find_files(SourceDir, ".*\\.gen\$"),
+
+        CompileFun = fun(Source, Opts1) ->
+            gen_compile(Opts1, Source, SourceDir)
+        end,
+        rebar_base_compiler:run(Opts, [], FoundFiles, CompileFun)
+    end || AppInfo <- Apps],
     {ok, State}.
 
 -spec format_error(any()) ->  iolist().
@@ -40,67 +48,74 @@ format_error(Reason) ->
     io_lib:format("~p", [Reason]).
 
 %%
-generate({Output, Generators}) when is_list(Generators) ->
-    rebar_api:debug("Generating ~ts", [Output]),
-    {ok, File} =  file:open(Output, [write]),
-    try 
-        lists:foreach(fun(Gen) ->
-            file:write(File, process(Gen))
-        end, Generators),
-    after 
-        ok = file:close(File)
+gen_compile(_Opts, Source, OutDir) ->
+    Data0 = try_fetch(Source),
+    Script = filename:rootname(Source, ".gen") ++ ".script",
+
+    case try_eval(Script, Data0) of
+        {ok, Data1} -> 
+            Template = bbmustache:parse_file(Source),
+            Binary = bbmustache:compile(Template, Data1, [{key_type, binary}]),
+
+            OutFile = filename:join(OutDir, filename:basename(Source, ".gen")),
+            filelib:ensure_dir(OutFile),
+            rebar_api:info("Writing out ~s", [OutFile]),
+            file:write_file(OutFile, Binary);
+        Error ->
+            Error
     end.
-generate({Output, Gen}) ->
-    generate({Output, [Gen]}).
 
-process({Uri, Transform, Template}) ->
-    Data0 = fetch(Uri),
-    Data1 = transform(Data0, Transform),
-    template(Data1, Template);
-process({Uri, Template}) ->
-    process({Uri, [], Template}).
+try_fetch(Source) ->
+    {ok, F} = file:open(Source, [read]),
+    try file:read_line(F) of
+        {ok, Line} -> 
+            case re:run(Line, <<"^\s*{{!(.+)}}\s*$">>, [{capture, [1], list}]) of
+                {match, [Url]} ->
+                    download(Url);
+                _ ->
+                    []
+            end;
+        _ ->
+            []
+    after
+        ok = file:close(F)
+    end.
 
-fetch(Url) ->
+try_eval(Script, Data) ->
+    case filelib:is_regular(Script) of
+        true ->
+            eval(Script, Data);
+        false ->
+            {ok, Data}
+    end.
+%%
+download(Url) ->
+    rebar_api:info("Downloading ~ts", [Url]),
     case httpc:request(get, {Url, [{"User-Agent", rebar_utils:user_agent()}]},
                        [{ssl, rebar_api:ssl_opts(Url)}, {relaxed, true} | rebar_utils:get_proxy_auth()],
                        [{body_format, binary}],
                        rebar) of
         {ok, {{_Version, 200, _Reason}, Headers, Body}} ->
             rebar_api:debug("Successfully downloaded ~ts", [Url]),
-            case lists:keyfind(<<"Content-Type">>, 1, Headers) of
-                {_, <<"application/json">>} ->
+            case lists:keyfind("content-type", 1, Headers) of
+                {_, "application/json"} ->
                     jsx:decode(Body, [return_maps]);
                 _ ->
                     Body
             end;
         {ok, {{_Version, Code, _Reason}, _Headers, _Body}} ->
-            rebar_api:debug("Request to ~p failed: status code ~p", [Url, Code]),
+            rebar_api:debug("Request to ~ts failed: status code ~p", [Url, Code]),
             erlang:error({http, Code});
         {error, Reason} ->
-            rebar_api:debug("Request to ~p failed: ~p", [Url, Reason]),
-            erlang:error({http, Code});
+            rebar_api:debug("Request to ~ts failed: ~p", [Url, Reason]),
+            erlang:error({download, Reason})
     end.
 
-transform(Data, {M, F, A}) -> 
-    erlang:apply(M, F, A ++ [Data]);
-transform(Data, List) when is_list(List) -> 
-    lists:foldl(fun({M, F, A}, Acc) ->
-        erlang:apply(M, F, A ++ Acc)
-    end, Data, List);
-transform(Data, []) ->
-    Data;
-transform(_, _) -> 
-    error({badarg, transform}).
-
-template(Data, {file, File}) ->
-    Template = bbmustache:parse_file(File),
-    compile(Data, Template);
-template(Data, Bin) when is_binary(Bin) ->
-    Template = bbmustache:parse_binary(Bin),
-    compile(Data, Template);
-template(Data, String) when is_list(String) ->
-    Template = bbmustache:parse_binary(list_to_binary(String)),
-    compile(Data, Template).
-
-compile(Data, Template) ->
-    bbmustache:compile(Template, Data, [{key_type, binary}]).
+eval(Script, Data) ->
+    Bindings = erl_eval:add_binding('Data', Data, erl_eval:new_bindings()),
+    case file:script(Script, Bindings) of
+        {ok, Terms} ->
+            {ok, Terms};
+        {error, Reason} ->
+            rebar_base_compiler:error_tuple(Script, [{Script, [Reason]}], [], [])
+    end.
