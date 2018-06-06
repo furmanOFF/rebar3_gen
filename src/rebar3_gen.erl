@@ -97,12 +97,11 @@ download(Url) ->
                        rebar) of
         {ok, {{_Version, 200, _Reason}, Headers, Body}} ->
             rebar_api:debug("Successfully downloaded ~ts", [Url]),
-            case lists:keyfind("content-type", 1, Headers) of
-                {_, "application/json" ++ _} ->
-                    jsx:decode(Body, [return_maps]);
-                _ ->
-                    Body
-            end;
+            ContentType = case lists:keyfind("content-type", 1, Headers) of
+                    {_, List} -> list_to_binary(List);
+                    _ -> undefined
+                end,
+            decode(ContentType, Body);
         {ok, {{_Version, Code, _Reason}, _Headers, _Body}} ->
             rebar_api:debug("Request to ~ts failed: status code ~p", [Url, Code]),
             erlang:error({http, Code});
@@ -110,6 +109,13 @@ download(Url) ->
             rebar_api:debug("Request to ~ts failed: ~p", [Url, Reason]),
             erlang:error({download, Reason})
     end.
+
+decode(<<"application/json", _/binary>>, Body) ->
+    rebar_api:debug("Content-Type is application/json", []),
+    jsx:decode(Body, [return_maps]);
+decode(Other, Body) ->
+    rebar_api:debug("Content-Type is ~s", [Other]),
+    Body.
 
 eval(Script, Data) ->
     Bindings = erl_eval:add_binding('Data', Data, erl_eval:new_bindings()),
