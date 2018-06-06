@@ -98,7 +98,7 @@ download(Url) ->
         {ok, {{_Version, 200, _Reason}, Headers, Body}} ->
             rebar_api:debug("Successfully downloaded ~ts", [Url]),
             case lists:keyfind("content-type", 1, Headers) of
-                {_, "application/json"} ->
+                {_, "application/json" ++ _} ->
                     jsx:decode(Body, [return_maps]);
                 _ ->
                     Body
