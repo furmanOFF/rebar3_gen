@@ -44,25 +44,30 @@ do(State) ->
     {ok, State}.
 
 -spec format_error(any()) ->  iolist().
+format_error({http, Code}) ->
+    io_lib:format("Request failed with code ~B", [Code]);
 format_error(Reason) ->
     io_lib:format("~p", [Reason]).
 
 %%
 gen_compile(_Opts, Source, OutDir) ->
-    Data0 = try_fetch(Source),
-    Script = filename:rootname(Source, ".gen") ++ ".script",
+    case try_fetch(Source) of
+        {ok, Data0} ->
+            Script = filename:rootname(Source, ".gen") ++ ".script",
+            case try_eval(Script, Data0) of
+                {ok, Data1} -> 
+                    Template = bbmustache:parse_file(Source),
+                    Binary = bbmustache:compile(Template, Data1, [{key_type, binary}]),
 
-    case try_eval(Script, Data0) of
-        {ok, Data1} -> 
-            Template = bbmustache:parse_file(Source),
-            Binary = bbmustache:compile(Template, Data1, [{key_type, binary}]),
-
-            OutFile = filename:join(OutDir, filename:basename(Source, ".gen")),
-            filelib:ensure_dir(OutFile),
-            rebar_api:info("Writing out ~s", [OutFile]),
-            file:write_file(OutFile, Binary);
-        Error ->
-            Error
+                    OutFile = filename:join(OutDir, filename:basename(Source, ".gen")),
+                    filelib:ensure_dir(OutFile),
+                    rebar_api:info("Writing out ~s", [OutFile]),
+                    file:write_file(OutFile, Binary);
+                {error, Error} ->
+                    rebar_base_compiler:error_tuple(Source, [Error], [], [])
+            end;
+        {error, Error} ->
+            rebar_base_compiler:error_tuple(Source, [Error], [], [])
     end.
 
 try_fetch(Source) ->
@@ -73,12 +78,12 @@ try_fetch(Source) ->
                 {match, [Url]} ->
                     download(Url);
                 _ ->
-                    []
+                    {ok, []}
             end;
         _ ->
-            []
+            {ok, []}
     after
-        ok = file:close(F)
+        file:close(F)
     end.
 
 try_eval(Script, Data) ->
@@ -104,18 +109,18 @@ download(Url) ->
             decode(ContentType, Body);
         {ok, {{_Version, Code, _Reason}, _Headers, _Body}} ->
             rebar_api:debug("Request to ~ts failed: status code ~p", [Url, Code]),
-            erlang:error({http, Code});
+            {error, {Url, [{?MODULE, {http, Code}}]}};
         {error, Reason} ->
             rebar_api:debug("Request to ~ts failed: ~p", [Url, Reason]),
-            erlang:error({download, Reason})
+            {error, {Url, [{?MODULE, Reason}]}}
     end.
 
 decode(<<"application/json", _/binary>>, Body) ->
     rebar_api:debug("Content-Type is application/json", []),
-    jsx:decode(Body, [return_maps]);
+    {ok, jsx:decode(Body, [return_maps])};
 decode(Other, Body) ->
     rebar_api:debug("Content-Type is ~s", [Other]),
-    Body.
+    {ok, Body}.
 
 eval(Script, Data) ->
     Bindings = erl_eval:add_binding('Data', Data, erl_eval:new_bindings()),
@@ -123,5 +128,5 @@ eval(Script, Data) ->
         {ok, Terms} ->
             {ok, Terms};
         {error, Reason} ->
-            rebar_base_compiler:error_tuple(Script, [{Script, [Reason]}], [], [])
+            {error, {Script, [Reason]}}
     end.
