@@ -1,5 +1,5 @@
 {application, rebar3_gen, [
-    {description, "rebar3 plugin"},
+    {description, "rebar3 source file generator plugin"},
     {vsn, "0.1.0"},
     {registered, []},
     {applications, [kernel, stdlib, inets, jsx]},

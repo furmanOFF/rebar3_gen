@@ -17,7 +17,7 @@ init(State) ->
         {deps, ?DEPS},
         {example, "rebar3 gen"},
         {opts, []},
-        {short_desc, "Source file generator"},
+        {short_desc, "Source file generator plugin"},
         {desc, "Convert .gen {{mustache}} files from given URL"}
     ]),
     {ok, rebar_state:add_provider(State, Provider)}.
@@ -123,6 +123,7 @@ decode(Other, Body) ->
     {ok, Body}.
 
 eval(Script, Data) ->
+    rebar_api:info("Evaluating ~ts", [Script]),
     Bindings = erl_eval:add_binding('Data', Data, erl_eval:new_bindings()),
     case file:script(Script, Bindings) of
         {ok, Terms} ->
