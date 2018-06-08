@@ -2,12 +2,13 @@
 A rebar plugin that generates .erl/.hrl (or any other source files) via templates, fetching data from specified URLs.
 
 ## Templates
-This plugin uses [{{mustache}}](https://github.com/soranoba/bbmustache) template engine to generate files.
-Each .gen source file must contain data URL at first line, in form of `{{!https://PATH/TO/JSON}}` comment line.
-After data is fetched, it is converted according to it's Content-Type headers (currenctly JSON is supported) and passed to template.
+This plugin uses [mustache](https://github.com/soranoba/bbmustache) template engine to generate files.
+Each **.gen** source file must contain data URL at first line, in form of `{{!https://PATH/TO/JSON}}` comment line.
+After data is fetched, it is converted according to it's Content-Type headers (currently JSON is supported) and passed to template.  
+*If no URL is provided, template will be called with empty list `[]` as input*
+
 There is a way of parsing and applying custom modifications to fetched data via .script file of same name.
-It should contain valid Erlang code and will be called with `Data` binding of fetched data.
-_If no URL is provided, template will be called with empty list `[]` as input_
+It should contain valid Erlang code and will be called with `Data` binding fetched data. 
 
 ## Build
     $ rebar3 compile
@@ -35,7 +36,6 @@ To have it invoked automatically when running `rebar3 compile` add it as a `prov
     ]}.
 
 ## TODO
-* Examples
 * Additional URIs (e.g. file://)
 * Additional Content-Types (e.g. XML, YAML)
 * Customize project search path

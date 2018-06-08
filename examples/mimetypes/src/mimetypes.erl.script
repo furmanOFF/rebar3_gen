@@ -1,0 +1,25 @@
+%% Parsing this binary:
+%  # application/atf
+%  # application/atfx
+%  application/atom+xml                atom
+%  application/atomcat+xml             atomcat
+
+Parts = binary:split(Data, <<"\n">>, [global, trim_all]),
+Types = lists:sort([begin
+    [Mime, Ext] = binary:split(Line, <<"\t">>, [global, trim_all]),
+    [Type, Subtype] = binary:split(Mime, <<"/">>),
+    {binary:split(Ext, <<" ">>, [global, trim_all]), Type, Subtype}
+end || Line= <<H:1/binary, _/binary>> <- Parts, H =/= <<"#">>]),
+
+Sorted = lists:ukeysort(1, [
+    {Ext, Type, Subtype} || {Extensions, Type, Subtype} <- Types, 
+                            Ext <- Extensions
+]),
+
+#{
+    <<"mimetypes">> => [#{
+        <<"extension">> => Ext,
+        <<"type">> => Type,
+        <<"subtype">> => Subtype
+    } || {Ext, Type, Subtype} <- Sorted]
+}.
